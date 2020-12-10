@@ -1,0 +1,35 @@
+{
+  "name": "isoworker",
+  "version": "0.0.1",
+  "description": "Isomorphic workerization with dependencies",
+  "main": "lib/index.js",
+  "module": "esm/index.js",
+  "types": "lib/index.d.ts",
+  "author": "Arjun Barrett",
+  "license": "MIT",
+  "scripts": {
+    "build": "yarn lint && tsc && tsc --project tsconfig.esm.json",
+    "lint": "eslint --fix \"src/**/*.ts\"",
+    "prepack": "yarn build"
+  },
+  "repository": "https://github.com/101arrowz/isoworker",
+  "bugs": {
+    "email": "arjunbarrett@gmail.com",
+    "url": "https://github.com/101arrowz/isoworker/issues"
+  },
+  "keywords": [
+    "worker",
+    "workerize",
+    "isomorphic"
+  ],
+  "devDependencies": {
+    "@types/node": "^14.14.11",
+    "@typescript-eslint/eslint-plugin": "^2.16.0",
+    "@typescript-eslint/parser": "^2.16.0",
+    "eslint": "^6.8.0",
+    "eslint-config-prettier": "^6.9.0",
+    "eslint-plugin-prettier": "^3.1.2",
+    "prettier": "^1.19.1",
+    "typescript": "^3.7.4"
+  }
+}

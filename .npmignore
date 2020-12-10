@@ -1,0 +1,7 @@
+*
+!esm/**/*
+!lib/**/*
+!umd/**/*
+!README.md
+!LICENSE
+!package.json
