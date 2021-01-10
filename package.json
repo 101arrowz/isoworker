@@ -1,14 +1,33 @@
 {
   "name": "isoworker",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Isomorphic workerization with dependencies",
-  "main": "lib/index.js",
-  "module": "esm/index.js",
+  "main": "./lib/index.js",
+  "module": "./esm/browser.js",
+  "browser": {
+    "./lib/node-worker.js": "./lib/worker.js",
+    "./esm/index.mjs": "./esm/browser.js"
+  },
+  "exports": {
+    ".": {
+      "node": "./esm/index.mjs",
+      "require": "./lib/index.js",
+      "default": "./esm/browser.js"
+    },
+    "./node": {
+      "import": "./esm/index.mjs",
+      "require": "./lib/node.js"
+    },
+    "./browser": {
+      "import": "./esm/browser.js",
+      "require": "./lib/browser.js"
+    }
+  },
   "types": "lib/index.d.ts",
   "author": "Arjun Barrett",
   "license": "MIT",
   "scripts": {
-    "build": "yarn lint && tsc && tsc --project tsconfig.esm.json",
+    "build": "yarn lint && tsc && tsc --project tsconfig.esm.json && node -r ts-node/register scripts/rewriteBuilds.ts",
     "lint": "eslint --fix \"src/**/*.ts\"",
     "prepack": "yarn build"
   },
@@ -20,7 +39,8 @@
   "keywords": [
     "worker",
     "workerize",
-    "isomorphic"
+    "isomorphic",
+    "inline"
   ],
   "devDependencies": {
     "@types/node": "^14.14.11",
@@ -30,6 +50,7 @@
     "eslint-config-prettier": "^6.9.0",
     "eslint-plugin-prettier": "^3.1.2",
     "prettier": "^1.19.1",
+    "ts-node": "^9.1.1",
     "typescript": "^4.1.2"
   }
 }

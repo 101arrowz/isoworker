@@ -1,4 +1,4 @@
-import wk, { transferables, WorkerTransfer } from './node-worker';
+import wk, { WorkerTransfer } from './node-worker';
 
 export type Registry = Record<string, boolean>;
 export type Context = [
@@ -36,6 +36,10 @@ const getAllPropertyKeys = (o: object) => {
   }
   return keys;
 };
+
+// optional chaining
+const chainWrap = (name: string, expr: string, short: string) =>
+  `(${expr}||(${short}={}))${name}`;
 
 const encoder = {
   undefined: () => 'void 0',
@@ -79,7 +83,7 @@ const encoder = {
     if (abvList.indexOf(proto.constructor) != -1) {
       ab.push((v as Uint8Array).buffer);
       return v;
-    } else if (transferables.indexOf(proto.constructor) != -1) {
+    } else if (wk.t.indexOf(proto.constructor) != -1) {
       ab.push(v as WorkerTransfer);
       return v;
     }
@@ -176,11 +180,25 @@ export function createContext(depList: DepList): Context {
   for (let i = 0; i < depValues.length; ++i) {
     const key = depNames[i],
       value = depValues[i];
+    const parts = key
+      .replace(/\\/, '')
+      .match(/^(.*?)(?=(\.|\[|$))|\[(.*?)\]|(\.(.*?))(?=(\.|\[|$))/g);
     const v = encoder[typeof value](value as never, reg, ab);
     if (typeof v == 'string') {
-      out += `self[${encoder.string(key)}]=${v};`;
+      let pfx = 'self.' + parts[0];
+      let chain = pfx;
+      for (let i = 1; i < parts.length; ++i) {
+        chain = chainWrap(parts[i], chain, pfx);
+        pfx += parts[i];
+      }
+      out += `${chain}=${v};`;
     } else {
-      dat[key] = v;
+      // TODO: overwrite instead of assign
+      let obj = dat;
+      for (let i = 0; i < parts.length - 1; ++i) {
+        obj = obj[parts[i]] = {};
+      }
+      obj[parts[parts.length - 1]] = v;
     }
   }
   return [out, dat, ab, reg];
@@ -191,12 +209,22 @@ const findTransferables = (vals: unknown[]) =>
     const proto = Object.getPrototypeOf(v);
     if (abvList.indexOf(proto.constructor) != -1) {
       a.push((v as Uint8Array).buffer);
-    } else if (transferables.indexOf(proto.constructor) != -1) {
+    } else if (wk.t.indexOf(proto.constructor) != -1) {
       a.push(v as WorkerTransfer);
     }
     return a;
   }, []) as WorkerTransfer[];
 
+/**
+ * Converts a function with dependencies into a worker
+ * @param fn The function to workerize
+ * @param deps The dependencies to add. This should include sub-dependencies.
+ *             For example, if you are workerizing a function that calls
+ *             another function, put any dependencies of the other function
+ *             here as well.
+ * @returns A function that accepts parameters and, as the last argument, a
+ *          callback to use when the worker returns.
+ */
 export function workerize<TA extends unknown[], TR>(
   fn: (...args: TA) => TR,
   deps: DepList
@@ -213,21 +241,19 @@ export function workerize<TA extends unknown[], TR>(
       fn,
       reg,
       tfl
-    )};var _p=function(d){d?typeof d.then=='function'?d.then(_p,function(e){throw e}):d.__transfer?postMessage(d.data,d.__transfer):postMessage(d):postMessage(d)};onmessage=function(e){_p(h.apply(self,e.data))}}`,
+    )};var _p=function(d){d?typeof d.then=='function'?d.then(_p):d.__transfer?postMessage(d.data,d.__transfer):postMessage(d):postMessage(d)};onmessage=function(e){_p(h.apply(self,e.data))}}`,
     msg,
     tfl,
     lifetimeCb
   );
   return (...args: [...TA, (err: Error, res: TR) => unknown]) => {
     const cb = args.pop() as (err: Error, res: TR) => unknown;
+    if (typeof cb != 'function') throw new TypeError('no callback provided');
     const lastCb = currentCb;
     const startCnt = runCnt++;
     currentCb = (err, r) => {
-      if (runCnt == startCnt) {
-        cb(err, r as TR);
-      } else {
-        lastCb(err, r);
-      }
+      if (runCnt == startCnt) cb(err, r as TR);
+      else lastCb(err, r);
     };
     worker.postMessage(args, findTransferables(args));
   };

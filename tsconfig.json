@@ -1,10 +1,7 @@
 {
   "compilerOptions": {
-    "target": "ES5",
     "moduleResolution": "node",
-    "module": "CommonJS",
     "outDir": "lib/",
-    "esModuleInterop": true,
     "declaration": true
   },
   "include": ["src/**/*.ts"]
