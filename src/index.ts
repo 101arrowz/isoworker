@@ -24,10 +24,11 @@ const abvList: Function[] = [
   Uint16Array,
   Int32Array,
   Float32Array,
-  Float64Array,
-  BigInt64Array,
-  BigUint64Array
+  Float64Array
 ];
+
+if (typeof BigInt64Array != 'undefined') abvList.push(BigInt64Array);
+if (typeof BigUint64Array != 'undefined') abvList.push(BigUint64Array);
 
 const getAllPropertyKeys = (o: object) => {
   let keys: (string | symbol)[] = Object.getOwnPropertyNames(o);
