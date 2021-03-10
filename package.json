@@ -1,26 +1,26 @@
 {
   "name": "isoworker",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Isomorphic workerization with dependencies",
-  "main": "./lib/index.js",
+  "main": "./lib/index.cjs",
   "module": "./esm/browser.js",
   "browser": {
-    "./lib/node-worker.js": "./lib/worker.js",
+    "./lib/node-worker.cjs": "./lib/worker.cjs",
     "./esm/index.mjs": "./esm/browser.js"
   },
   "exports": {
     ".": {
       "node": "./esm/index.mjs",
-      "require": "./lib/index.js",
+      "require": "./lib/index.cjs",
       "default": "./esm/browser.js"
     },
     "./node": {
       "import": "./esm/index.mjs",
-      "require": "./lib/node.js"
+      "require": "./lib/node.cjs"
     },
     "./browser": {
       "import": "./esm/browser.js",
-      "require": "./lib/browser.js"
+      "require": "./lib/browser.cjs"
     }
   },
   "types": "lib/index.d.ts",
