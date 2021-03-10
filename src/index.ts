@@ -12,8 +12,7 @@ export type DepList = () => unknown[];
 const fnName = (f: Function) => {
   if (f.name) return f.name;
   const ts = f.toString();
-  const spInd = ts.indexOf(' ', 8) + 1;
-  return ts.slice(spInd, ts.indexOf('(', spInd));
+  return ts.slice(0, 9) == 'function ' && ts.slice(9, ts.indexOf('(', 9));
 };
 
 const abvList: Function[] = [
@@ -58,7 +57,7 @@ const encoder = {
     else if (v.prototype) {
       const nm = fnName(v);
       if (nm) {
-        if (nm in reg) return `self[${encoder.string(fnName(v))}]`;
+        if (nm in reg) return `self[${encoder.string(nm)}]`;
         reg[nm] = true;
       }
       if (st[0] != 'c') {
@@ -217,6 +216,19 @@ const findTransferables = (vals: unknown[]) =>
   }, []) as WorkerTransfer[];
 
 /**
+ * A workerized function (from arguments and return type)
+ */
+export type Workerized<A extends unknown[], R> = ((
+  ...args: [...A, (err: Error, res: R) => unknown]
+) => void) & {
+  /**
+   * Kills the worker associated with this workerized function.
+   * Subsequent calls will fail.
+   */
+  close(): void;
+};
+
+/**
  * Converts a function with dependencies into a worker
  * @param fn The function to workerize
  * @param deps The dependencies to add. This should include sub-dependencies.
@@ -229,33 +241,43 @@ const findTransferables = (vals: unknown[]) =>
 export function workerize<TA extends unknown[], TR>(
   fn: (...args: TA) => TR,
   deps: DepList
-): (...args: [...TA, (err: Error, res: TR) => unknown]) => void {
+): Workerized<TA, TR> {
   const [str, msg, tfl, reg] = createContext(deps);
   let currentCb: (err: Error, res: unknown) => void;
-  let runCnt = 0;
-  const lifetimeCb = (err: Error, res: unknown) => {
-    --runCnt;
-    currentCb(err, res);
-  };
+  let runCount = 0;
+  let callCount = 0;
   const worker = wk(
     `${str};onmessage=function(e){for(var k in e.data){self[k]=e.data[k]}var h=${encoder.function(
       fn,
       reg,
       tfl
-    )};var _p=function(d){d?typeof d.then=='function'?d.then(_p):d.__transfer?postMessage(d.data,d.__transfer):postMessage(d):postMessage(d)};onmessage=function(e){_p(h.apply(self,e.data))}}`,
+    )};var _p=function(d){d?typeof d.then=='function'?d.then(_p):postMessage(d,d.__transferList):postMessage(d)};onmessage=function(e){_p(h.apply(self,e.data))}}`,
     msg,
     tfl,
-    lifetimeCb
+    (err, res) => {
+      ++runCount;
+      currentCb(err, res);
+    }
   );
-  return (...args: [...TA, (err: Error, res: TR) => unknown]) => {
+  let closed = false;
+  const wfn: Workerized<TA, TR> = (...args) => {
     const cb = args.pop() as (err: Error, res: TR) => unknown;
     if (typeof cb != 'function') throw new TypeError('no callback provided');
+    if (closed) {
+      cb(new Error('worker thread closed'), null);
+      return;
+    }
     const lastCb = currentCb;
-    const startCnt = runCnt++;
+    const startCount = ++callCount;
     currentCb = (err, r) => {
-      if (runCnt == startCnt) cb(err, r as TR);
+      if (runCount == startCount) cb(err, r as TR);
       else lastCb(err, r);
     };
     worker.postMessage(args, findTransferables(args));
   };
+  wfn.close = () => {
+    worker.terminate();
+    closed = true;
+  };
+  return wfn;
 }

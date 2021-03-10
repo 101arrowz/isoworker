@@ -61,28 +61,29 @@ asyncCount((err, result) => {
 });
 // 0
 // got 0 from worker
-asyncCount(() => {});
+asyncCount((err, res) => {
+  asyncCount.close();
+});
 // 1
-// got 1 from worker
 
 // Since that was run on another thread, the main thread's value hasn't
 // been mutated
-console.log(count); // 0
+console.log(number); // 0
 ```
 
-If you want to run setup code, you can use a flag.
+If you want to run setup code, you can use a condition within the function and/or a flag.
 ```js
-let wasm;
+const wasm = {};
 
 // generic WASM runner
 // Promises are automatically resolved, so using async/await is fine
 const runWasmSync = async (wasmName, method, ...args) => {
-  if (!wasm) {
-    wasm = (await WebAssembly.instantiateStreaming(
+  if (!wasm[wasmName]) {
+    wasm[wasmName] = (await WebAssembly.instantiateStreaming(
       fetch(`/wasm-files/${wasmName}.wasm`)
     )).module.exports;
   }
-  return wasm[method](...args);
+  return wasm[wasmName][method](...args);
 }
 const runWasm = workerize(runWasmSync, () => [wasm]);
 
