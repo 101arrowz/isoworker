@@ -61,14 +61,16 @@ asyncCount((err, result) => {
 });
 // 0
 // got 0 from worker
-asyncCount((err, res) => {
-  asyncCount.close();
-});
+asyncCount(() => {});
 // 1
 
 // Since that was run on another thread, the main thread's value hasn't
 // been mutated
 console.log(number); // 0
+
+// When you're finished using the function, call .close() to free the
+// resources used by the worker thread
+asyncCount.close();
 ```
 
 If you want to run setup code, you can use a condition within the function and/or a flag.
@@ -96,6 +98,44 @@ runWasm('hello', 'sayHelloTo', 'me', (err, res) => {
 // This all runs on a separate thread; WASM is not here
 console.log(wasm); // undefined
 ```
+
+The workerizer supports complex types (including symbols, functions, classes, and instances of those classes) with infinite nesting thanks to a nifty recursive serializer.
+
+```js
+// ES5 style class works
+function Example1() {
+  this.y = 2;
+}
+Example1.prototype.z = function() {
+  return this.y * 2;
+}
+
+function Example2() {
+  this.x = 3;
+  Example1.call(this);
+}
+// Prototypal inheritance/extension works
+Example2.prototype = Object.create(Example2.prototype);
+
+class OtherClass {
+  constructor()
+}
+
+const dat = new Example2();
+
+const getZ = workerize(() => {
+  dat.y **= dat.x;
+  // On the worker thread, now dat.y == 8
+  return dat.z(); // dat.y * 2 == 16
+}, () => [dat]);
+
+getZ(console.log) // 16
+
+// Nothing changed on the main thread
+console.log(dat.z()) // 4
+```
+
+If you're a library author, you may want to use the context creation API but don't need the workerization support. In that case, use `createContext(() => [dep1, dep2])` and use the return value `[code, ]`
 
 ## License
 MIT

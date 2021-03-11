@@ -1,19 +1,7 @@
 import wk, { WorkerTransfer } from './node-worker';
 
-export type Registry = Record<string, boolean>;
-export type Context = [
-  string,
-  Record<string, unknown>,
-  WorkerTransfer[],
-  Registry
-];
+export type Context = [string, Record<string, unknown>, unknown[]];
 export type DepList = () => unknown[];
-
-const fnName = (f: Function) => {
-  if (f.name) return f.name;
-  const ts = f.toString();
-  return ts.slice(0, 9) == 'function ' && ts.slice(9, ts.indexOf('(', 9));
-};
 
 const abvList: Function[] = [
   Int8Array,
@@ -29,6 +17,8 @@ const abvList: Function[] = [
 if (typeof BigInt64Array != 'undefined') abvList.push(BigInt64Array);
 if (typeof BigUint64Array != 'undefined') abvList.push(BigUint64Array);
 
+const rand = () => Math.ceil(Math.random() * 1073741823);
+
 const getAllPropertyKeys = (o: object) => {
   let keys: (string | symbol)[] = Object.getOwnPropertyNames(o);
   if (Object.getOwnPropertySymbols) {
@@ -37,48 +27,77 @@ const getAllPropertyKeys = (o: object) => {
   return keys;
 };
 
-// optional chaining
-const chainWrap = (name: string, expr: string, short: string) =>
-  `(${expr}||(${short}={}))${name}`;
+type GetGBN = (v: unknown) => string;
+type SetGBN = (v: unknown, w: string) => string;
+
+type SymbolMap = Record<symbol, string>;
 
 const encoder = {
   undefined: () => 'void 0',
-  bigint: (v: BigInt) => v.toString() + 'n',
-  symbol: (v: symbol) => {
-    const key = Symbol.keyFor(v);
-    return key
-      ? `Symbol.for(${encoder.string(key)})`
-      : `Symbol(${encoder.string(v.toString().slice(7, -1))})`;
-  },
+  bigint: (v: BigInt) => v + 'n',
   string: (v: string) => JSON.stringify(v),
-  function: (v: Function, reg: Registry, ab: WorkerTransfer[]) => {
-    let st = v.toString();
-    if (st.indexOf('[native code]', 12) != -1) st = fnName(v);
-    else if (v.prototype) {
-      const nm = fnName(v);
-      if (nm) {
-        if (nm in reg) return `self[${encoder.string(nm)}]`;
-        reg[nm] = true;
-      }
-      if (st[0] != 'c') {
-        // Not an ES6 class; must iterate across the properties
-        // Ignore superclass properties, assume superclass is handled elsewhere
-        st = '(function(){var v=' + st;
-        for (const t of getAllPropertyKeys(v.prototype)) {
-          const val = v.prototype[t];
-          if (t != 'constructor') {
-            st += `;v[${encoder[typeof t as 'string' | 'symbol'](
-              t as never
-            )}]=${encoder[typeof val](val as never, reg, ab)}`;
-          }
-        }
-        st += ';return v})()';
-      }
-    }
-    return st;
+  boolean: (v: boolean) => v + '',
+  number: (v: number) => v + '',
+  symbol: (v: symbol, _: unknown, m: SymbolMap) => {
+    const key = Symbol.keyFor(v);
+    if (key) return `Symbol.for(${encoder.string(key)})`;
+    let gbn = m[v];
+    if (gbn) return `self[${gbn}]`;
+    gbn = m[v] = Math.ceil(Math.random() * 1073741823);
+    return `(self[${gbn}]=Symbol(${encoder.string(
+      v.toString().slice(7, -1)
+    )}))`;
   },
-  object: (v: object, reg: Registry, ab: WorkerTransfer[]) => {
+  function: (
+    v: Function,
+    ab: WorkerTransfer[],
+    m: SymbolMap,
+    g: GetGBN,
+    s: SetGBN
+  ) => {
+    const gbn = g(v);
+    if (gbn) return gbn;
+    let st = v.toString();
+    if (st.indexOf('[native code]', 12) != -1) return v.name;
+    if (v.prototype) {
+      const proto = v.prototype;
+      const superCtr = Object.getPrototypeOf(proto).constructor;
+      // TODO: Avoid duplicating methods for ES6 classes
+      st = `(function(){var v=${st};${
+        superCtr == Object
+          ? ''
+          : `v.prototype=Object.create(${encoder.function(
+              superCtr,
+              ab,
+              m,
+              g,
+              s
+            )});`
+      }`;
+      for (const t of getAllPropertyKeys(proto)) {
+        const val = proto[t];
+        if (t != 'constructor') {
+          st += `v.prototype[${encoder[typeof t as 'string' | 'symbol'](
+            t as never,
+            ab,
+            m
+          )}]=${encoder[typeof val](val as never, ab, m, g, s)};`;
+        }
+      }
+      st += 'return v})()';
+    }
+    return s(v, st);
+  },
+  object: (
+    v: object,
+    ab: WorkerTransfer[],
+    m: SymbolMap,
+    g: GetGBN,
+    s: SetGBN
+  ) => {
     if (v == null) return 'null';
+    const gbn = g(v);
+    if (gbn) return gbn;
     const proto = Object.getPrototypeOf(v);
     if (abvList.indexOf(proto.constructor) != -1) {
       ab.push((v as Uint8Array).buffer);
@@ -87,46 +106,30 @@ const encoder = {
       ab.push(v as WorkerTransfer);
       return v;
     }
-    let out = '';
-    out += `(function(){`;
-    let classDecl = '';
-    for (
-      let i = 0, l = proto;
-      l.constructor != Object;
-      l = Object.getPrototypeOf(l), ++i
-    ) {
-      const cls = l.constructor;
-      const nm = fnName(cls) || '_cls' + i;
-      if (nm in reg) continue;
-      const enc = encoder.function(cls, reg, ab);
-      if (enc == nm) {
-        break;
-      } else {
-        reg[nm] = true;
-        classDecl = `self[${encoder.string(nm)}]=${enc};` + classDecl;
-      }
-    }
+    let out = '(function(){var v=';
     let keys = getAllPropertyKeys(v);
-    if (proto.constructor == Array) {
+    if (proto.constructor == Object) out += `{};`;
+    else if (proto.constructor == Array) {
       let arrStr = '';
       for (let i = 0; i < (v as unknown[]).length; ++i) {
         if (i in v) {
           const val = v[i];
-          arrStr += encoder[typeof val](val as never, reg, ab);
+          arrStr += encoder[typeof val](val as never, ab, m, g, s);
         }
         arrStr += ',';
       }
       keys = keys.filter(k => {
         return isNaN(+(k as string)) && k != 'length';
       });
-      out += `var v=[${arrStr.slice(0, -1)}]`;
-    } else {
-      out +=
-        classDecl +
-        `var v=Object.create(self[${encoder.string(
-          fnName(proto.constructor) || '_cls0'
-        )}].prototype);`;
-    }
+      out += `[${arrStr.slice(0, -1)}]`;
+    } else
+      out += `Object.create(${encoder.function(
+        proto.constructor,
+        ab,
+        m,
+        g,
+        s
+      )}.prototype)`;
 
     for (const t of keys) {
       const {
@@ -141,23 +144,19 @@ const encoder = {
       if (typeof writable == 'boolean') {
         desc += `writable:${writable},value:${encoder[typeof value](
           value as never,
-          reg,
-          ab
+          ab,
+          m,
+          g,
+          s
         )}`;
-      } else {
-        desc += `get:${get ? encoder.function(get, reg, ab) : 'void 0'},${
-          set ? encoder.function(set, reg, ab) : 'void 0'
-        }`;
-      }
+      } else desc += `get:${get || 'void 0'},set:${set || 'void 0'}`;
       desc += `,enumerable:${enumerable},configurable:${configurable}}`;
-      out += `Object.defineProperty(v, ${encoder[
+      out += `;Object.defineProperty(v, ${encoder[
         typeof t as 'string' | 'symbol'
-      ](t as never)}, ${desc});`;
+      ](t as never, ab, m)}, ${desc})`;
     }
-    return out + 'return v})()';
-  },
-  boolean: (v: boolean) => v.toString(),
-  number: (v: number) => v.toString()
+    return out + ';return v})()';
+  }
 };
 
 /**
@@ -174,34 +173,38 @@ export function createContext(depList: DepList): Context {
     .split(',');
   const depValues = depList();
   let out = '';
-  const reg: Registry = {};
   const dat: Record<string, unknown> = {};
   const ab: WorkerTransfer[] = [];
+  const symMap: Record<symbol, string> = {};
+  const gbnKey = typeof Symbol == 'undefined' ? `__iwgbn${rand()}__` : Symbol();
+  const getGBN = (obj: unknown) => {
+    const gbn: string = obj[gbnKey];
+    if (gbn) return `self[${gbn}]`;
+  };
+  const setGBN = (obj: unknown, wrap: string) => {
+    const gbn = rand();
+    Object.defineProperty(obj, gbnKey, {
+      value: gbn
+    });
+    return `(self[${gbn}]=${wrap})`;
+  };
   for (let i = 0; i < depValues.length; ++i) {
     const key = depNames[i],
       value = depValues[i];
+    const v = encoder[typeof value](value as never, ab, symMap, getGBN, setGBN);
     const parts = key
       .replace(/\\/, '')
       .match(/^(.*?)(?=(\.|\[|$))|\[(.*?)\]|(\.(.*?))(?=(\.|\[|$))/g);
-    const v = encoder[typeof value](value as never, reg, ab);
-    if (typeof v == 'string') {
-      let pfx = 'self.' + parts[0];
-      let chain = pfx;
-      for (let i = 1; i < parts.length; ++i) {
-        chain = chainWrap(parts[i], chain, pfx);
-        pfx += parts[i];
-      }
-      out += `${chain}=${v};`;
-    } else {
-      // TODO: overwrite instead of assign
-      let obj = dat;
-      for (let i = 0; i < parts.length - 1; ++i) {
-        obj = obj[parts[i]] = {};
-      }
-      obj[parts[parts.length - 1]] = v;
+    let pfx = 'self.' + parts[0];
+    let chain = pfx;
+    for (let i = 1; i < parts.length; ++i) {
+      chain = `(${chain}||(${pfx}={}))${parts[i]}`;
+      pfx += parts[i];
     }
+    if (typeof v == 'string') out += `${chain}=${v};`;
+    else dat[chain] = v;
   }
-  return [out, dat, ab, reg];
+  return [out, dat, ab];
 }
 
 const findTransferables = (vals: unknown[]) =>
@@ -235,25 +238,35 @@ export type Workerized<A extends unknown[], R> = ((
  *             For example, if you are workerizing a function that calls
  *             another function, put any dependencies of the other function
  *             here as well.
+ * @param replaceTransfer The list of objects to replace the default transfer
+ *                        list with. If you provide an array of transferable
+ *                        items, they will be used; if you provide the value
+ *                        `true`, `isoworker` will refrain from the default
+ *                        behavior of automatically transferring everything
+ *                        it can.
  * @returns A function that accepts parameters and, as the last argument, a
  *          callback to use when the worker returns.
  */
 export function workerize<TA extends unknown[], TR>(
   fn: (...args: TA) => TR,
-  deps: DepList
+  deps: DepList,
+  replaceTransfer?: unknown[] | boolean
 ): Workerized<TA, TR> {
-  const [str, msg, tfl, reg] = createContext(deps);
+  const [str, msg, tfl] = createContext(deps);
   let currentCb: (err: Error, res: unknown) => void;
   let runCount = 0;
   let callCount = 0;
+  let assignStr = '';
+  const transfer = (replaceTransfer
+    ? replaceTransfer instanceof Array
+      ? replaceTransfer
+      : []
+    : tfl) as WorkerTransfer[];
+  for (const k in msg) assignStr += `self.${k}=e.data[${encoder.string(k)}];`;
   const worker = wk(
-    `${str};onmessage=function(e){for(var k in e.data){self[k]=e.data[k]}var h=${encoder.function(
-      fn,
-      reg,
-      tfl
-    )};var _p=function(d){d?typeof d.then=='function'?d.then(_p):postMessage(d,d.__transferList):postMessage(d)};onmessage=function(e){_p(h.apply(self,e.data))}}`,
+    `${str};onmessage=function(e){${assignStr}var h=${fn};var _p=function(d){d?typeof d.then=='function'?d.then(_p):postMessage(d,d.__transfer):postMessage(d)};onmessage=function(e){_p(h.apply(self,e.data))}}`,
     msg,
-    tfl,
+    transfer,
     (err, res) => {
       ++runCount;
       currentCb(err, res);
