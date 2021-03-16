@@ -6,7 +6,7 @@ Isomorphic workerization with context in under 4kB
 
 Worker threads allow you to run code without blocking the event loop or slowing down your browser. They can be used for hard number-crunching, running WASM without freezing the browser, parallel processing, and many more cool possibilities.
 
-If you're not experienced with build tools or are creating a library, however, using worker threads is virtually impossible. Nothing works on all platforms, with all build tools, and doesn't require embedding the codebase as a string. That's why most "asynchronous" packages such as [JSZip](https://github.com/Stuk/jszip) still run on the main thread and still hang the browser when doing a lot of work.
+If you're not experienced with build tools or are creating a library, however, using worker threads is virtually impossible. Nothing works on all platforms, with all build tools, and doesn't require embedding the codebase as a string. That's why most "asynchronous" packages such as [JSZip](https://github.com/Stuk/jszip) still run on the main thread in an event loop. While running in the event loop is fine, it doesn't allow your JS to take advantage of multiple CPU cores.
 
 This package abstracts all difficulties away by making your standard functions magically run in a separate thread in all environments. You don't even need a new file to run your code, and unlike other workerization packages, you can actually call other functions and use variables from your worker.
 
@@ -79,7 +79,7 @@ const wasm = {};
 
 // generic WASM runner
 // Promises are automatically resolved, so using async/await is fine
-const runWasmSync = async (wasmName, method, ...args) => {
+const runWasmMainThread = async (wasmName, method, ...args) => {
   if (!wasm[wasmName]) {
     wasm[wasmName] = (await WebAssembly.instantiateStreaming(
       fetch(`/wasm-files/${wasmName}.wasm`)
@@ -87,7 +87,7 @@ const runWasmSync = async (wasmName, method, ...args) => {
   }
   return wasm[wasmName][method](...args);
 }
-const runWasm = workerize(runWasmSync, () => [wasm]);
+const runWasm = workerize(runWasmMainThread, () => [wasm]);
 
 // If /wasm-files/hello.wasm exports a sayHelloTo method
 // that accepts a string argument for who to say hello to:
@@ -115,27 +115,60 @@ function Example2() {
   Example1.call(this);
 }
 // Prototypal inheritance/extension works
-Example2.prototype = Object.create(Example2.prototype);
+Example2.prototype = Object.create(Example1.prototype);
 
-class OtherClass {
-  constructor()
+// Normal extension works as well
+class OtherClass extends Example2 {
+  constructor() {
+    super();
+    console.log('Created an OtherClass');
+  }
+
+  getResult() {
+    return 'z() = ' + this.z();
+  }
 }
 
-const dat = new Example2();
+const dat = new OtherClass(); // Created an OtherClass
 
 const getZ = workerize(() => {
-  dat.y **= dat.x;
-  // On the worker thread, now dat.y == 8
-  return dat.z(); // dat.y * 2 == 16
+  // On the worker thread, now dat.y is increased by dat.x
+  dat.y += dat.x;
+  return dat.getResult();
 }, () => [dat]);
 
-getZ(console.log) // 16
+
+// Note than when doing this, "Created an OtherClass" is not logged
+// Your classes and objects are created without construction or mutation
+
+getZ((err, result) => console.log(result)) // z() = 10
+getZ((err, result) => console.log(result)) // z() = 16
 
 // Nothing changed on the main thread
-console.log(dat.z()) // 4
+console.log(dat.y) // 2
+console.log(dat.getResult()); // z() = 4
 ```
 
-If you're a library author, you may want to use the context creation API but don't need the workerization support. In that case, use `createContext(() => [dep1, dep2])` and use the return value `[code, ]`
+If you need to maximize performance and know how to use [Transferables](https://developer.mozilla.org/en-US/docs/Web/API/Transferable), you can set a list of transferables by returning `__transfer` in your workerized function.
+
+```js
+// Since Uint8Array and Math.random() are in the global environment,
+// they don't need to be added to the dependency list
+const getRandomBuffer = workerize((bufLen) => {
+  const buf = new Uint8Array(bufLen);
+  for (let i = 0; i < bufLen; ++i) {
+    // Uint8Array automatically takes the floor
+    buf[i] = Math.random() * 256;
+  }
+  buf.__transfer = [buf.buffer];
+  return buf;
+}, []);
+getRandomBuffer(2 ** 30, (err, result) => {
+  console.log(result);
+});
+```
+
+If you're a library author, you may want to use the context creation API but don't need the workerization support. In that case, use `createContext(() => [dep1, dep2])` and use the return value `[code, initMessage, transferList]`. Take a look at the source code to understand how to use these. Effectively, `code` encodes most of the dependencies, `initMessage` contains code to be executed on the first message (and occasionally values that must be passed to that code), and `transferList` is the array of `Transferable`s that can optionally be transferred in the initialization message for much better initialization performance at the cost of breaking the implementation on the main thread if it depends on values that were transferred.
 
 ## License
 MIT

@@ -27,7 +27,8 @@
   "author": "Arjun Barrett",
   "license": "MIT",
   "scripts": {
-    "build": "yarn lint && tsc && tsc --project tsconfig.esm.json && node -r ts-node/register scripts/rewriteBuilds.ts",
+    "build": "yarn lint && yarn build:lib",
+    "build:lib": "tsc && tsc --project tsconfig.esm.json && node -r ts-node/register scripts/rewriteBuilds.ts",
     "lint": "eslint --fix \"src/**/*.ts\"",
     "prepack": "yarn build"
   },
