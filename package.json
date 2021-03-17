@@ -1,6 +1,6 @@
 {
   "name": "isoworker",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Isomorphic workerization with dependencies",
   "main": "./lib/index.cjs",
   "module": "./esm/browser.js",

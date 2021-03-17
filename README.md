@@ -80,6 +80,7 @@ const wasm = {};
 // generic WASM runner
 // Promises are automatically resolved, so using async/await is fine
 const runWasmMainThread = async (wasmName, method, ...args) => {
+  // The wasm object acts as a cache for WASM files
   if (!wasm[wasmName]) {
     wasm[wasmName] = (await WebAssembly.instantiateStreaming(
       fetch(`/wasm-files/${wasmName}.wasm`)
@@ -177,6 +178,23 @@ getRandomBuffer(2 ** 31, (err, result) => {
 ```
 
 If you're a library author, you may want to use the context creation API but don't need the workerization support. In that case, use `createContext(() => [dep1, dep2])` and use the return value `[code, initMessage, transferList]`. Take a look at the source code to understand how to use these. Effectively, `code` encodes most of the dependencies, `initMessage` contains code to be executed on the first message (and occasionally values that must be passed to that code), and `transferList` is the array of `Transferable`s that can optionally be transferred in the initialization message for much better initialization performance at the cost of breaking the implementation on the main thread if it depends on values that were transferred.
+
+## Possible Pitfalls
+
+Although `isoworker` can handle most dependencies, including objects of user-created classes, certain native classes and objects will not work. Of course, the basic ones (primitives, dates, objects, arrays, sets, maps, etc.) work well, but more advanced types such as `MediaRecorder` and `Audio` cannot be used as dependencies. You'll need to send over information that you used to construct them (for `Audio`, the URL) via function parameters.
+
+Another point to note is that much of the package is based off of elaborate (but fallible) pseudo-parsers for stringified functions. In other words, if you try to break things, you can. However, as long as you don't do something like this:
+
+```js
+const dontDoThis = {
+  get ["(please)"] /* function() { */ () {
+    console.log('hi')
+  }
+};
+workerize(() => dontDoThis["(please)"], () => [dontDoThis]);
+```
+
+you will be fine.
 
 ## License
 MIT

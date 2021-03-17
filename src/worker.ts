@@ -19,9 +19,7 @@ const wk = (
 };
 export type WorkerTransfer = Transferable;
 wk.t = [ArrayBuffer, MessagePort] as Function[];
-wk.c = [Date, Blob, File, FileList, ImageData] as Function[];
-if (typeof Map != 'undefined') wk.c.push(Map);
-if (typeof Set != 'undefined') wk.c.push(Set);
+wk.c = [Blob, File, FileList, ImageData] as Function[];
 if (typeof ImageBitmap != 'undefined') wk.t.push(ImageBitmap);
 if (typeof OffscreenCanvas != 'undefined') wk.t.push(OffscreenCanvas);
 

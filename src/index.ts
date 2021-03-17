@@ -14,6 +14,11 @@ const abvList: Function[] = [
   Float64Array
 ];
 
+const setExists = typeof Set != 'undefined';
+const mapExists = typeof Map != 'undefined';
+
+if (setExists && !Set.prototype.values) wk.c.push(Set);
+if (mapExists && !Map.prototype.entries) wk.c.push(Map);
 if (typeof BigInt64Array != 'undefined') abvList.push(BigInt64Array);
 if (typeof BigUint64Array != 'undefined') abvList.push(BigUint64Array);
 
@@ -216,7 +221,8 @@ const encoder = {
     dat: Array<string | [string, unknown]>
   ) => {
     if (v == null) return 'null';
-    const proto = Object.getPrototypeOf(v), ctr = proto.constructor;
+    const proto = Object.getPrototypeOf(v),
+      ctr = proto.constructor;
     let cln = 0;
     if (abvList.indexOf(ctr) != -1) cln = ab.push((v as Uint8Array).buffer);
     else if (wk.t.indexOf(ctr) != -1) cln = ab.push(v as WorkerTransfer);
@@ -251,7 +257,57 @@ const encoder = {
         return isNaN(+(k as string)) && k != 'length';
       });
       out += `[${arrStr.slice(0, -1)}]`;
-    } else
+    } else if (setExists && ctr == Set) {
+      let setStr = '';
+      let getsSets = '';
+      const it = (v as Set<unknown>).values();
+      for (let i = 0, v = it.next(); !v.done; ++i, v = it.next()) {
+        const dl = dat.length;
+        const sn = `__iwinit${i}__`;
+        setStr += `${encoder[typeof v.value](
+          v.value as never,
+          ab,
+          m,
+          g,
+          s,
+          ctx.concat(sn),
+          dat
+        )},`;
+        if (dat.length != dl)
+          getsSets += `;Object.defineProperty(v,"${sn}",{get:function(){return i[${i}]},set:function(n){v.delete(i[${i}]);v.add(i[${i}]=n)}})`;
+      }
+      out += `0;var i=[${setStr.slice(0, -1)}];v=new Set(i)${getsSets}`;
+    } else if (mapExists && ctr == Map) {
+      let mapStr = '';
+      let getsSets = '';
+      const it = (v as Map<unknown, unknown>).entries();
+      for (let i = 0, v = it.next(); !v.done; ++i, v = it.next()) {
+        const [key, val] = v.value;
+        const dl = dat.length;
+        const sn = `__iwinit${i}__`;
+        mapStr += `[${encoder[typeof key](
+          key as never,
+          ab,
+          m,
+          g,
+          s,
+          ctx.concat(sn, 0),
+          dat
+        )},${encoder[typeof val](
+          val as never,
+          ab,
+          m,
+          g,
+          s,
+          ctx.concat(sn, 1),
+          dat
+        )}],`;
+        if (dat.length != dl)
+          getsSets += `;Object.defineProperty(v,"${sn}",{value:{get 0(){return i[${i}][0]},set 0(n){v.delete(i[${i}][0]);v.set(i[${i}][0]=n,i[${i}][1])},get 1(){return i[${i}][1]},set 1(n){v.set(i[${i}][0],i[${i}][1]=n)}}})`;
+      }
+      out += `0;var i=[${mapStr.slice(0, -1)}];v=new Map(i)${getsSets}`;
+    } else if (ctr == Date) out += `new Date(${(v as Date).getTime()})`;
+    else
       out += `Object.create(${encoder.function(
         ctr,
         ab,
@@ -323,7 +379,8 @@ export function createContext(depList: DepList): Context {
 
 const findTransferables = (vals: unknown[]) =>
   vals.reduce<WorkerTransfer[]>((a, v) => {
-    const proto = Object.getPrototypeOf(v), ctr = proto.constructor;
+    const proto = Object.getPrototypeOf(v),
+      ctr = proto.constructor;
     if (abvList.indexOf(ctr) != -1) {
       a.push((v as Uint8Array).buffer);
     } else if (wk.t.indexOf(ctr) != -1) {
@@ -403,7 +460,7 @@ export function workerize<TA extends unknown[], TR>(
     }
   }
   const worker = wk(
-    `${str};onmessage=function(e){${assignStr}var v=${fn};var _p=function(d){typeof d.then=='function'?d.then(_p,_e):postMessage(d,d?d.__transfer:[])};var _e=function(e){!(e instanceof Error)&&(e=new Error(e));postMessage({__iwerr__:{s:e.stack,m:e.message,n:e.name}})};onmessage=function(e){try{_p(v.apply(self,e.data))}catch(e){_e(e)}}}`,
+    `${str};onmessage=function(e){${assignStr}var v=${fn};var _p=function(d){d?typeof d.then=='function'?d.then(_p,_e):postMessage(d,d.__transfer):postMessage(d)};var _e=function(e){!(e instanceof Error)&&(e=new Error(e));postMessage({__iwerr__:{s:e.stack,m:e.message,n:e.name}})};onmessage=function(e){try{_p(v.apply(self,e.data))}catch(e){_e(e)}}}`,
     msg,
     transfer,
     (err, res) => {
