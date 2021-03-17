@@ -1,14 +1,14 @@
 # isoworker
 
-Isomorphic workerization with context in under 4kB
+Isomorphic workerization with context in 6kB
 
 ## Why?
 
 Worker threads allow you to run code without blocking the event loop or slowing down your browser. They can be used for hard number-crunching, running WASM without freezing the browser, parallel processing, and many more cool possibilities.
 
-If you're not experienced with build tools or are creating a library, however, using worker threads is virtually impossible. Nothing works on all platforms, with all build tools, and doesn't require embedding the codebase as a string. That's why most "asynchronous" packages such as [JSZip](https://github.com/Stuk/jszip) still run on the main thread in an event loop. While running in the event loop is fine, it doesn't allow your JS to take advantage of multiple CPU cores.
+If you're not experienced with build tools or are creating a library, however, using worker threads is virtually impossible. Nothing works on all platforms, with all build tools, and doesn't require embedding the codebase as a string. Moreover, it's not possible to transfer data, particularly complex classes and objects, to the worker thread without using JSON. That's why most "asynchronous" packages such as [JSZip](https://github.com/Stuk/jszip) still run on the main thread in an event loop. While running in the event loop is fine, it doesn't allow your code to take advantage of the multiple CPU cores that exist on most devices; everything still runs on one thread.
 
-This package abstracts all difficulties away by making your standard functions magically run in a separate thread in all environments. You don't even need a new file to run your code, and unlike other workerization packages, you can actually call other functions and use variables from your worker.
+In just 6kB of pure JavaScript (3kB gzipped), `isoworker` abstracts all these difficulties away by making your standard functions magically run in a separate thread in all environments. You don't even need a new file to run your code, and unlike other workerization packages, you can actually call other functions and use variables from your worker. The serializer is the heart of the package;
 
 A subset of this package is used in [`fflate`](https://github.com/101arrowz/fflate), the fastest compression library for JavaScript. It's been immensely useful for supporting Node.js and browsers as old as IE11 while still offering *true* parallelization potential.
 

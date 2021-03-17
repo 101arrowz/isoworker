@@ -17,5 +17,8 @@ const wk = (
   return w;
 };
 wk.t = [ArrayBuffer, MessagePort] as Function[];
+wk.c = [Date] as Function[];
+if (typeof Map != 'undefined') wk.c.push(Map);
+if (typeof Set != 'undefined') wk.c.push(Set);
 export type WorkerTransfer = TransferListItem;
 export default wk;

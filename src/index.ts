@@ -216,13 +216,12 @@ const encoder = {
     dat: Array<string | [string, unknown]>
   ) => {
     if (v == null) return 'null';
-    const proto = Object.getPrototypeOf(v);
-    let abv: WorkerTransfer;
-    if (abvList.indexOf(proto.constructor) != -1)
-      abv = (v as Uint8Array).buffer;
-    else if (wk.t.indexOf(proto.constructor) != -1) abv = v as WorkerTransfer;
-    if (abv) {
-      ab.push(abv);
+    const proto = Object.getPrototypeOf(v), ctr = proto.constructor;
+    let cln = 0;
+    if (abvList.indexOf(ctr) != -1) cln = ab.push((v as Uint8Array).buffer);
+    else if (wk.t.indexOf(ctr) != -1) cln = ab.push(v as WorkerTransfer);
+    else if (wk.c.indexOf(ctr) != -1) cln = 1;
+    if (cln) {
       dat.push([`${renderCtx(ctx, ab, m)}=${toReplace};`, v]);
       return toReplace;
     }
@@ -230,8 +229,8 @@ const encoder = {
     if (gbn) return gbn;
     let out = '(function(){var v=';
     let keys = getAllPropertyKeys(v);
-    if (proto.constructor == Object) out += `{}`;
-    else if (proto.constructor == Array) {
+    if (ctr == Object) out += `{}`;
+    else if (ctr == Array) {
       let arrStr = '';
       for (let i = 0; i < (v as unknown[]).length; ++i) {
         if (i in v) {
@@ -254,7 +253,7 @@ const encoder = {
       out += `[${arrStr.slice(0, -1)}]`;
     } else
       out += `Object.create(${encoder.function(
-        proto.constructor,
+        ctr,
         ab,
         m,
         g,
@@ -324,10 +323,10 @@ export function createContext(depList: DepList): Context {
 
 const findTransferables = (vals: unknown[]) =>
   vals.reduce<WorkerTransfer[]>((a, v) => {
-    const proto = Object.getPrototypeOf(v);
-    if (abvList.indexOf(proto.constructor) != -1) {
+    const proto = Object.getPrototypeOf(v), ctr = proto.constructor;
+    if (abvList.indexOf(ctr) != -1) {
       a.push((v as Uint8Array).buffer);
-    } else if (wk.t.indexOf(proto.constructor) != -1) {
+    } else if (wk.t.indexOf(ctr) != -1) {
       a.push(v as WorkerTransfer);
     }
     return a;
