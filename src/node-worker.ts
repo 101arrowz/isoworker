@@ -14,9 +14,6 @@ const wk = (
     .on('message', msg => cb(null, msg))
     .on('error', err => cb(err, null));
   w.postMessage(msg, transfer);
-  w.terminate = () => {
-    return Worker.prototype.terminate.call(w);
-  };
   return w;
 };
 wk.t = [ArrayBuffer, MessagePort] as Function[];

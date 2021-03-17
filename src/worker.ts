@@ -4,8 +4,14 @@ const wk = (
   transfer: Transferable[],
   cb: (err: Error, res: unknown) => unknown
 ): Worker => {
-  const u = URL.createObjectURL(new Blob([c], { type: 'text/javascript' }));
-  const w = new Worker(u);
+  let w: Worker;
+  try {
+    const url = URL.createObjectURL(new Blob([c], { type: 'text/javascript' }));
+    w = new Worker(url);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    w = new Worker('data:application/javascript;charset=UTF-8,' + encodeURI(c));
+  }
   w.postMessage(msg, transfer);
   w.addEventListener('message', ev => cb(null, ev.data));
   w.addEventListener('error', ev => cb(ev.error, null));
