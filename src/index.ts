@@ -27,23 +27,39 @@ const getAllPropertyKeys = (o: object) => {
   return keys;
 };
 
-const bannedFunctionKeys = getAllPropertyKeys(Function.prototype).concat('prototype');
+const bannedFunctionKeys = getAllPropertyKeys(Function.prototype).concat(
+  'prototype'
+);
 
 const toReplace = '/*r*/null';
 const toReplaceRE = /\/\*r\*\/null/g;
 
-const renderCtx = (ctx: (string | number | symbol)[], ab: WorkerTransfer[], m: SymbolMap) => {
+const renderCtx = (
+  ctx: (string | number | symbol)[],
+  ab: WorkerTransfer[],
+  m: SymbolMap
+) => {
   let out = 'self';
   for (const key of ctx) {
-    out += `[${
-      encoder[typeof key as 'string' | 'number' | 'symbol']
-        (key as never, ab, m)
-    }]`;
+    out += `[${encoder[typeof key as 'string' | 'number' | 'symbol'](
+      key as never,
+      ab,
+      m
+    )}]`;
   }
   return out;
-}
+};
 
-const vDescriptors = (v: unknown, keys: (string | symbol)[], ab: WorkerTransfer[], m: SymbolMap, g: GetGBN, s: SetGBN, ctx: (string | symbol | number)[], dat: Array<string | [string, unknown]>) => {
+const vDescriptors = (
+  v: unknown,
+  keys: (string | symbol)[],
+  ab: WorkerTransfer[],
+  m: SymbolMap,
+  g: GetGBN,
+  s: SetGBN,
+  ctx: (string | symbol | number)[],
+  dat: Array<string | [string, unknown]>
+) => {
   let out = '';
   const renderedCtx = renderCtx(ctx, ab, m);
   for (const t of keys) {
@@ -55,19 +71,12 @@ const vDescriptors = (v: unknown, keys: (string | symbol)[], ab: WorkerTransfer[
       writable,
       value
     } = Object.getOwnPropertyDescriptor(v, t);
-    const keyEnc = encoder[
-      typeof t as 'string' | 'symbol'
-    ](t as never, ab, m);
-    let desc = '{', res: string;
-    const enc = typeof writable == 'boolean' && encoder[typeof value](
-      value as never,
-      ab,
-      m,
-      g,
-      s,
-      ctx.concat(t),
-      dat
-    );
+    const keyEnc = encoder[typeof t as 'string' | 'symbol'](t as never, ab, m);
+    let desc = '{',
+      res: string;
+    const enc =
+      typeof writable == 'boolean' &&
+      encoder[typeof value](value as never, ab, m, g, s, ctx.concat(t), dat);
     const replaced = enc == toReplace;
     let obj = 'v';
     if (replaced) {
@@ -75,9 +84,13 @@ const vDescriptors = (v: unknown, keys: (string | symbol)[], ab: WorkerTransfer[
       dat.pop();
     }
     if (enc) {
-      if (writable && configurable && enumerable) res = `${obj}[${keyEnc}]=${enc}`;
+      if (writable && configurable && enumerable)
+        res = `${obj}[${keyEnc}]=${enc}`;
       else desc += `writable:${writable},value:${enc}`;
-    } else desc += `get:${get ? encoder.function(get, ab, m, g, s, ctx, dat) : 'void 0'},set:${set ? encoder.function(set, ab, m, g, s, ctx, dat) : 'void 0'}`;
+    } else
+      desc += `get:${
+        get ? encoder.function(get, ab, m, g, s, ctx, dat) : 'void 0'
+      },set:${set ? encoder.function(set, ab, m, g, s, ctx, dat) : 'void 0'}`;
     if (!res) {
       desc += `,enumerable:${enumerable},configurable:${configurable}}`;
       res = `Object.defineProperty(${obj}, ${encoder[
@@ -88,10 +101,11 @@ const vDescriptors = (v: unknown, keys: (string | symbol)[], ab: WorkerTransfer[
     else out += `;${res}`;
   }
   if (Object.isSealed(v)) dat.push(`Object.seal(${renderedCtx});`);
-  if (!Object.isExtensible(v)) dat.push(`Object.preventExtensions(${renderedCtx});`);
+  if (!Object.isExtensible(v))
+    dat.push(`Object.preventExtensions(${renderedCtx});`);
   if (Object.isFrozen(v)) dat.push(`Object.freeze(${renderedCtx});`);
   return out;
-}
+};
 
 type GetGBN = (v: unknown) => string;
 type SetGBN = (v: unknown, w: string) => string;
@@ -129,12 +143,12 @@ const encoder = {
     if (st[0] != '(' && !proto) {
       const headMatch = st.match(/^(.+?)(?=\()/g);
       if (headMatch) st = 'function' + st.slice(headMatch[0].length);
-      else throw new TypeError(`failed to find function body in ${st}`)
+      else throw new TypeError(`failed to find function body in ${st}`);
     }
     const vd = vDescriptors(
       v,
-      getAllPropertyKeys(v).filter(key =>
-        bannedFunctionKeys.indexOf(key) == -1
+      getAllPropertyKeys(v).filter(
+        key => bannedFunctionKeys.indexOf(key) == -1
       ),
       ab,
       m,
@@ -161,10 +175,13 @@ const encoder = {
           dat
         );
         if (st[0] == 'c') {
-          const superName = st.match(/(?<=^class(.*?)extends(.*?)(\s+))(.+?)(?=(\s*){)/g);
-          if (!superName) throw new TypeError(`failed to find superclass in ${st}`);
-          st = `${base}var ${superName[0]}=${superEnc};var v=${st}`
-        } else st = `${base}var v=${st};v.prototype=Object.create(${superEnc})`
+          const superName = st.match(
+            /(?<=^class(.*?)extends(.*?)(\s+))(.+?)(?=(\s*){)/g
+          );
+          if (!superName)
+            throw new TypeError(`failed to find superclass in ${st}`);
+          st = `${base}var ${superName[0]}=${superEnc};var v=${st}`;
+        } else st = `${base}var v=${st};v.prototype=Object.create(${superEnc})`;
       }
       for (const t of getAllPropertyKeys(proto)) {
         const val = proto[t];
@@ -174,11 +191,19 @@ const encoder = {
             ab,
             m
           );
-          st += `;v.prototype[${key}]=${encoder[typeof val](val as never, ab, m, g, s, ctx.concat('prototype', key), dat)}`;
+          st += `;v.prototype[${key}]=${encoder[typeof val](
+            val as never,
+            ab,
+            m,
+            g,
+            s,
+            ctx.concat('prototype', key),
+            dat
+          )}`;
         }
       }
       st += `${vd};return v})()`;
-    } else if (vd.length) st = `(function(){var v=${st}${vd};return v})()`
+    } else if (vd.length) st = `(function(){var v=${st}${vd};return v})()`;
     return s(v, st);
   },
   object: (
@@ -193,7 +218,8 @@ const encoder = {
     if (v == null) return 'null';
     const proto = Object.getPrototypeOf(v);
     let abv: WorkerTransfer;
-    if (abvList.indexOf(proto.constructor) != -1) abv = (v as Uint8Array).buffer
+    if (abvList.indexOf(proto.constructor) != -1)
+      abv = (v as Uint8Array).buffer;
     else if (wk.t.indexOf(proto.constructor) != -1) abv = v as WorkerTransfer;
     if (abv) {
       ab.push(abv);
@@ -210,7 +236,15 @@ const encoder = {
       for (let i = 0; i < (v as unknown[]).length; ++i) {
         if (i in v) {
           const val = v[i];
-          arrStr += encoder[typeof val](val as never, ab, m, g, s, ctx.concat(i), dat);
+          arrStr += encoder[typeof val](
+            val as never,
+            ab,
+            m,
+            g,
+            s,
+            ctx.concat(i),
+            dat
+          );
         }
         arrStr += ',';
       }
@@ -261,11 +295,19 @@ export function createContext(depList: DepList): Context {
     });
     return `(self[${gbn}]=${wrap})`;
   };
-  
+
   for (let i = 0; i < depValues.length; ++i) {
     const key = depNames[i],
       value = depValues[i];
-    const v = encoder[typeof value](value as never, ab, symMap, getGBN, setGBN, [key], dat);
+    const v = encoder[typeof value](
+      value as never,
+      ab,
+      symMap,
+      getGBN,
+      setGBN,
+      [key],
+      dat
+    );
     const parts = key
       .replace(/\\/, '')
       .match(/^(.*?)(?=(\.|\[|$))|\[(.*?)\]|(\.(.*?))(?=(\.|\[|$))/g);
@@ -304,6 +346,17 @@ export type Workerized<A extends unknown[], R> = ((
   close(): void;
 };
 
+const globalEnv =
+  typeof globalThis == 'undefined'
+    ? typeof window == 'undefined'
+      ? typeof self == 'undefined'
+        ? typeof global == 'undefined'
+          ? {}
+          : global
+        : self
+      : window
+    : globalThis;
+
 /**
  * Converts a function with dependencies into a worker
  * @param fn The function to workerize
@@ -338,25 +391,37 @@ export function workerize<TA extends unknown[], TR>(
   const msg: unknown[] = [];
   for (let cmd of exec) {
     if (typeof cmd != 'string') {
-      cmd = cmd[0].replace(toReplaceRE, `e.data[${msg.push(cmd[1]) - 1}]`)
+      cmd = cmd[0].replace(toReplaceRE, `e.data[${msg.push(cmd[1]) - 1}]`);
     }
     assignStr += cmd;
   }
   if (!replaceTransfer) {
     const tfKey = typeof Symbol == 'undefined' ? `__iwtf${rand()}__` : Symbol();
     for (let i = 0; i < transfer.length; ++i) {
-      const buf = transfer[i]
+      const buf = transfer[i];
       if (buf[tfKey]) transfer.splice(i--, 1);
       buf[tfKey] = 1;
     }
   }
   const worker = wk(
-    `${str};onmessage=function(e){${assignStr}var v=${fn};var _p=function(d){typeof d.then=='function'?d.then(_p,_e):postMessage({v:d},d?d.__transfer:[])};var _e=function(e);onmessage=function(e){_p(v.apply(self,e.data))}}`,
+    `${str};onmessage=function(e){${assignStr}var v=${fn};var _p=function(d){typeof d.then=='function'?d.then(_p,_e):postMessage(d,d?d.__transfer:[])};var _e=function(e){!(e instanceof Error)&&(e=new Error(e));postMessage({__iwerr__:{s:e.stack,m:e.message,n:e.name}})};onmessage=function(e){try{_p(v.apply(self,e.data))}catch(e){_e(e)}}}`,
     msg,
     transfer,
     (err, res) => {
       ++runCount;
-      currentCb(err, res);
+      const rtErr =
+        res &&
+        (res as { __iwerr__?: { n: string; s: string; m: string } }).__iwerr__;
+      if (rtErr) {
+        err = new (globalEnv[rtErr.n] || Error)();
+        err.message = rtErr.m;
+        err.name = rtErr.n;
+        err.stack = rtErr.s;
+        currentCb(err, null);
+      } else if (err) {
+        for (; runCount <= callCount; ++runCount) currentCb(err, res);
+        wfn.close();
+      } else currentCb(err, res);
     }
   );
   let closed = false;

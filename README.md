@@ -155,6 +155,9 @@ If you need to maximize performance and know how to use [Transferables](https://
 // Since Uint8Array and Math.random() are in the global environment,
 // they don't need to be added to the dependency list
 const getRandomBuffer = workerize((bufLen) => {
+  if (bufLen > 2 ** 30) {
+    throw new TypeError('cannot create over 1GB random values');
+  }
   const buf = new Uint8Array(bufLen);
   for (let i = 0; i < bufLen; ++i) {
     // Uint8Array automatically takes the floor
@@ -162,9 +165,14 @@ const getRandomBuffer = workerize((bufLen) => {
   }
   buf.__transfer = [buf.buffer];
   return buf;
-}, []);
-getRandomBuffer(2 ** 30, (err, result) => {
-  console.log(result);
+}, () => []);
+getRandomBuffer(2 ** 28, (err, result) => {
+  console.log(err); // null
+  console.log(result); // Uint8Array(1073741824) [ ... ]
+});
+getRandomBuffer(2 ** 31, (err, result) => {
+  console.log(err); // TypeError: cannot process over 1GB
+  console.log(result); // null
 });
 ```
 
