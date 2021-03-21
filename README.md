@@ -169,7 +169,7 @@ const getRandomBuffer = workerize((bufLen) => {
 }, () => []);
 getRandomBuffer(2 ** 28, (err, result) => {
   console.log(err); // null
-  console.log(result); // Uint8Array(1073741824) [ ... ]
+  console.log(result); // Uint8Array(268435456) [ ... ]
 });
 getRandomBuffer(2 ** 31, (err, result) => {
   console.log(err); // TypeError: cannot process over 1GB
@@ -181,7 +181,41 @@ If you're a library author, you may want to use the context creation API but don
 
 ## Possible Pitfalls
 
-Although `isoworker` can handle most dependencies, including objects of user-created classes, certain native classes and objects will not work. Of course, the basic ones (primitives, dates, objects, arrays, sets, maps, etc.) work well, but more advanced types such as `MediaRecorder` and `Audio` cannot be used as dependencies. You'll need to send over information that you used to construct them (for `Audio`, the URL) via function parameters.
+One important issue to note is that `isoworker` does NOT serialize the data passed into and out of your functions by default, meaning that custom classes and objects cannot be used as parameters or return values. If you want to use complex arguments, you can use `true` as the third parameter to the `workerize` function.
+
+```js
+class CustomClass {
+  static Y = 10;
+  x = 1;
+  constructor(y = 2) {
+    this.y = y;
+  }
+  getX() {
+    return this.x;
+  }
+}
+
+// The dependency list can be [CustomClass] or [CustomClass.Y]
+// With [CustomClass.Y], the worker may initialize more quickly.
+const diffStaticYWithXY = workerize(obj => {
+  return CustomClass.Y - obj.getX() * obj.y;
+}, () => [CustomClass.Y], true); // <-- third argument is true
+
+// Now, custom classes work in arguments
+diffStaticYWithXY(new CustomClass(), (err, res) => {
+  console.log(res); // 8
+});
+
+const cc2 = new CustomClass(3);
+cc2.x = 4;
+diffStaticYWithXY(cc2, (err, res) => {
+  console.log(res); // -2
+});
+```
+
+This isn't the default behavior because it's expensive performance-wise and because dynamic evaluation can break on sites with a tight Content Security Protocol. In addition, note that the return value may never be something that cannot be structured-cloned (besides `Promise`, which is automatically resolved).
+
+Although `isoworker` can handle most dependencies, including objects of user-created classes, certain native classes and objects will not work. Of course, the basic ones (primitives, dates, objects, arrays, sets, maps, etc.) work well, but more advanced types such as `MediaRecorder` and `Audio` cannot be used as dependencies. You'll need to send over information that you used to construct them (for `Audio`, the URL) via function parameters. Additionally, any custom class using a private field (denoted by a `#` prefix, e.g. `#someKey`) will not have access to the private field post-workerization because finding the value for that field at runtime is not possible.
 
 Another point to note is that much of the package is based off of elaborate (but fallible) pseudo-parsers for stringified functions. In other words, if you try to break things, you can. However, as long as you don't do something like this:
 

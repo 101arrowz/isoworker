@@ -1,7 +1,12 @@
 import wk, { WorkerTransfer } from './node-worker';
 
+type SymbolMap = Record<symbol, number>;
 export type Context = [string, Array<string | [string, unknown]>, unknown[]];
 export type DepList = () => unknown[];
+export type Environment = {
+  s: SymbolMap;
+  r: symbol | string;
+};
 
 const abvList: Function[] = [
   Int8Array,
@@ -24,10 +29,18 @@ if (typeof BigUint64Array != 'undefined') abvList.push(BigUint64Array);
 
 const rand = () => Math.ceil(Math.random() * 1073741823);
 
+const iwInternalRE = /^__iw(.*)__$/;
+
 const getAllPropertyKeys = (o: object) => {
-  let keys: (string | symbol)[] = Object.getOwnPropertyNames(o);
+  let keys: (string | symbol)[] = Object.getOwnPropertyNames(o).filter(
+    name => !iwInternalRE.test(name)
+  );
   if (Object.getOwnPropertySymbols) {
-    keys = keys.concat(Object.getOwnPropertySymbols(o));
+    keys = keys.concat(
+      Object.getOwnPropertySymbols(o).filter(
+        sym => !iwInternalRE.test(Symbol.keyFor(sym))
+      )
+    );
   }
   return keys;
 };
@@ -37,7 +50,7 @@ const bannedFunctionKeys = getAllPropertyKeys(Function.prototype).concat(
 );
 
 const toReplace = '/*r*/null';
-const toReplaceRE = /\/\*r\*\/null/g;
+const toReplaceRE = /\/\*r\*\/null/;
 
 const renderCtx = (
   ctx: (string | number | symbol)[],
@@ -114,8 +127,6 @@ const vDescriptors = (
 
 type GetGBN = (v: unknown) => string;
 type SetGBN = (v: unknown, w: string) => string;
-
-type SymbolMap = Record<symbol, string>;
 
 const encoder = {
   undefined: () => 'void 0',
@@ -308,7 +319,7 @@ const encoder = {
       out += `0;var i=[${mapStr.slice(0, -1)}];v=new Map(i)${getsSets}`;
     } else if (ctr == Date) out += `new Date(${(v as Date).getTime()})`;
     else
-      out += `Object.create(${encoder.function(
+      out += `Object.create((${encoder.function(
         ctr,
         ab,
         m,
@@ -316,29 +327,20 @@ const encoder = {
         s,
         ctx.concat('constructor'),
         dat
-      )}.prototype)`;
+      )}).prototype)`;
     return out + vDescriptors(v, keys, ab, m, g, s, ctx, dat) + ';return v})()';
   }
 };
 
-/**
- * Creates a context for a worker execution environment
- * @param depList The dependencies in the worker environment
- * @returns An environment that can be built to a Worker. Note the fourth
- * element of the tuple, the global element registry, is currently not useful.
- */
-export function createContext(depList: DepList): Context {
-  const depListStr = depList.toString();
-  const depNames = depListStr
-    .slice(depListStr.indexOf('[') + 1, depListStr.lastIndexOf(']'))
-    .replace(/\s/g, '')
-    .split(',');
-  const depValues = depList();
+const ccRaw = (
+  depNames: string[],
+  depValues: unknown[],
+  env: Environment
+): Context => {
   let out = '';
   const dat: Array<string | [string, unknown]> = [];
   const ab: WorkerTransfer[] = [];
-  const symMap: Record<symbol, string> = {};
-  const gbnKey = typeof Symbol == 'undefined' ? `__iwgbn${rand()}__` : Symbol();
+  const gbnKey = env.r;
   const getGBN = (obj: unknown) => {
     const gbn: string = obj[gbnKey];
     if (gbn) return `self[${gbn}]`;
@@ -357,7 +359,7 @@ export function createContext(depList: DepList): Context {
     const v = encoder[typeof value](
       value as never,
       ab,
-      symMap,
+      env.s,
       getGBN,
       setGBN,
       [key],
@@ -374,20 +376,76 @@ export function createContext(depList: DepList): Context {
     }
     out += `${chain}=${v};`;
   }
+  for (let i = 0; i < ab.length; ++i) {
+    const buf = ab[i];
+    if (buf[gbnKey] == -1) ab.splice(i--, 1);
+    else buf[gbnKey] = -1;
+  }
   return [out, dat, ab];
+};
+
+/**
+ * Creates a context for a worker execution environment
+ * @param depList The dependencies in the worker environment
+ * @param env The environment to use for the worker. If this object was used
+ *            before, `isoworker` will use certain optimizations to avoid code
+ *            duplication. This is useful for sending a serialized message to
+ *            a worker to be dynamically evaluated, in which case you may want
+ *            to avoid duplicating existing function declarations.
+ * @returns An environment that can be built to a Worker. Note the fourth
+ * element of the tuple, the global element registry, is currently not useful.
+ */
+export function createContext(
+  depList: DepList | DepList[],
+  env: Partial<Environment> = {}
+): Context {
+  let depNames: string[] = [];
+  let depValues: unknown[] = [];
+  if (!env.r) {
+    const base = `__iwgbn${rand()}__`;
+    env.r = typeof Symbol == 'undefined' ? base : Symbol.for(base);
+  }
+  if (!env.s) env.s = {};
+  for (const dl of depList instanceof Array ? depList : [depList]) {
+    const dlStr = dl.toString();
+    depNames = depNames.concat(
+      dlStr
+        .slice(dlStr.indexOf('[') + 1, dlStr.lastIndexOf(']'))
+        .replace(/\s/g, '')
+        .split(',')
+    );
+    depValues = depValues.concat(dl());
+  }
+  return ccRaw(depNames, depValues, env as Environment);
 }
 
-const findTransferables = (vals: unknown[]) =>
-  vals.reduce<WorkerTransfer[]>((a, v) => {
+const findTransferables = (vals: unknown[]) => {
+  const tfKeyBase = `__iwtf${rand()}__`;
+  const tfKey =
+    typeof Symbol == 'undefined' ? tfKeyBase : Symbol.for(tfKeyBase);
+  return vals.reduce<WorkerTransfer[]>((a, v) => {
     const proto = Object.getPrototypeOf(v),
       ctr = proto.constructor;
     if (abvList.indexOf(ctr) != -1) {
-      a.push((v as Uint8Array).buffer);
-    } else if (wk.t.indexOf(ctr) != -1) {
+      const buf = (v as Uint8Array).buffer;
+      if (!buf[tfKey]) {
+        buf[tfKey] = 1;
+        a.push(buf);
+      }
+    } else if (wk.t.indexOf(ctr) != -1 && !v[tfKey]) {
+      v[tfKey] = 1;
       a.push(v as WorkerTransfer);
     }
     return a;
   }, []);
+};
+
+/**
+ * A RegExp that matches the placeholder used in isoworker's initial message code.
+ * Used after loading structured-cloneable data onto the worker thread in order to
+ * finalize the context creation.
+ */
+export const dataPlaceholder = toReplaceRE;
 
 /**
  * A workerized function (from arguments and return type)
@@ -431,10 +489,12 @@ const globalEnv =
  */
 export function workerize<TA extends unknown[], TR>(
   fn: (...args: TA) => TR,
-  deps: DepList,
+  deps: DepList | DepList[],
+  serializeArgs?: boolean,
   replaceTransfer?: unknown[] | boolean
 ): Workerized<TA, TR> {
-  const [str, exec, tfl] = createContext(deps);
+  const env: Partial<Environment> = {};
+  const [str, exec, tfl] = createContext(deps, env);
   let currentCb: (err: Error, res: unknown) => void;
   let runCount = 0;
   let callCount = 0;
@@ -451,16 +511,11 @@ export function workerize<TA extends unknown[], TR>(
     }
     assignStr += cmd;
   }
-  if (!replaceTransfer) {
-    const tfKey = typeof Symbol == 'undefined' ? `__iwtf${rand()}__` : Symbol();
-    for (let i = 0; i < transfer.length; ++i) {
-      const buf = transfer[i];
-      if (buf[tfKey]) transfer.splice(i--, 1);
-      buf[tfKey] = 1;
-    }
-  }
+  const fixArgs = serializeArgs
+    ? 'var b=e.data[1];eval(e.data[0]);d=self.__iwargs__;'
+    : '';
   const worker = wk(
-    `${str};onmessage=function(e){${assignStr}var v=${fn};var _p=function(d){d?typeof d.then=='function'?d.then(_p,_e):postMessage(d,d.__transfer):postMessage(d)};var _e=function(e){!(e instanceof Error)&&(e=new Error(e));postMessage({__iwerr__:{s:e.stack,m:e.message,n:e.name}})};onmessage=function(e){try{_p(v.apply(self,e.data))}catch(e){_e(e)}}}`,
+    `${str}onmessage=function(e){${assignStr}var v=${fn};var _p=function(d){d?typeof d.then=='function'?d.then(_p,_e):postMessage(d,d.__transfer):postMessage(d)};var _e=function(e){!(e instanceof Error)&&(e=new Error(e));postMessage({__iwerr__:{s:e.stack,m:e.message,n:e.name}})};onmessage=function(e){var d=e.data;${fixArgs}try{_p(v.apply(self,d))}catch(e){_e(e)}}}`,
     msg,
     transfer,
     (err, res) => {
@@ -494,7 +549,17 @@ export function workerize<TA extends unknown[], TR>(
       if (runCount == startCount) cb(err, r as TR);
       else lastCb(err, r);
     };
-    worker.postMessage(args, findTransferables(args));
+    if (serializeArgs) {
+      let [code, ext, mtfl] = ccRaw(['__iwargs__'], [args], env as Environment);
+      const rawMsg: unknown[] = [];
+      for (let cmd of ext) {
+        if (typeof cmd != 'string') {
+          cmd = cmd[0].replace(toReplaceRE, `b[${rawMsg.push(cmd[1]) - 1}]`);
+        }
+        code += cmd;
+      }
+      worker.postMessage([code, rawMsg], mtfl as WorkerTransfer[]);
+    } else worker.postMessage(args, findTransferables(args));
   };
   wfn.close = () => {
     worker.terminate();

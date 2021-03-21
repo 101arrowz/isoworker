@@ -10,6 +10,7 @@
     "sourceType": "module"
   },
   "rules": {
-    "@typescript-eslint/ban-types": "off"
+    "@typescript-eslint/ban-types": "off",
+    "prefer-const": ["error", { "destructuring": "all" }]
   }
 }
